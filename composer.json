@@ -1,0 +1,31 @@
+{
+    "name": "freshleafmedia/dopple",
+    "description": "Mirror a site to static files",
+    "type": "project",
+    "require": {
+        "php": "^8.6",
+        "spatie/crawler": "^9.4",
+        "ext-dom": "*",
+        "ext-libxml": "*",
+        "ext-uri": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Dopple\\": "src/"
+        }
+    },
+    "require-dev": {
+        "pestphp/pest": "^5.3"
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "scripts": {
+        "test": [
+            "Composer\\Config::disableProcessTimeout",
+            "pest --parallel --order-by=random"
+        ]
+    }
+}

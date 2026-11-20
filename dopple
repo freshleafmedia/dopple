@@ -1,0 +1,87 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Dopple\CrawlerResponses;
+use Dopple\FileStore;
+use Dopple\HtaccessBuilder;
+use Dopple\NullUrlParser;
+use Dopple\Observers\CollectSharedHeaders;
+use Dopple\Observers\CountRequests;
+use Dopple\Observers\DownloadAndQueueReferencedUrls;
+use Dopple\Observers\PrintProgress;
+use Dopple\Options;
+use Dopple\RunSummary;
+use Dopple\SelfAwareThrottle;
+use Dopple\WellKnownPaths;
+use Dopple\UrlRewriter;
+use Spatie\Crawler\Crawler;
+use Spatie\Crawler\CrawlUrl;
+
+require __DIR__ . '/vendor/autoload.php';
+
+$startedAt = hrtime(true);
+
+$options = Options::parse(array_slice($argv, 1));
+$store = new FileStore($options->outputPath);
+$crawlerResponses = new CrawlerResponses();
+$requestCounter = new CountRequests();
+$sharedHeaders = new CollectSharedHeaders();
+$crawler = Crawler::create($options->startUrl->toRawString());
+
+$notFoundProbeUrl = $options->startUrl->resolve('/dopple-404-' . bin2hex(random_bytes(8)));
+$crawler->addToCrawlQueue(new CrawlUrl($notFoundProbeUrl->toRawString()));
+
+foreach (new WellKnownPaths() as $wellKnownPath) {
+    $url = $options->startUrl->resolve($wellKnownPath)->toRawString();
+
+    $crawler->addToCrawlQueue(new CrawlUrl($url));
+}
+
+$crawler
+    ->internalOnly()
+    ->ignoreRobots()
+    ->followNofollow()
+    ->withoutVerifying()
+    ->userAgent('Dopple v1')
+    ->concurrency($options->concurrency)
+    ->requestTimeout($options->timeout)
+    ->limit($options->maxPages)
+    ->throttle(new SelfAwareThrottle())
+    ->urlParser(new NullUrlParser())
+    ->addObserver(
+        new DownloadAndQueueReferencedUrls(
+            $crawler,
+            $store,
+            $crawlerResponses,
+            $notFoundProbeUrl,
+        ),
+        new PrintProgress(),
+        $requestCounter,
+        $sharedHeaders,
+    )
+    ->start();
+
+fwrite(STDOUT, 'Rewriting paths...' . PHP_EOL);
+
+foreach ($crawlerResponses as $crawlerResponse) {
+    if (! $crawlerResponse->canReferenceUrls) {
+        continue;
+    }
+
+    $path = FileStore::makeFilePathForStorage($crawlerResponse);
+
+    $rewrittenContent = UrlRewriter::rewriteAbsoluteUrlsToRootSlash(
+        $store->read($path),
+        $crawlerResponse->originalUrl,
+    );
+
+    $store->write($path, $rewrittenContent);
+}
+
+$store->write('/.htaccess', new HtaccessBuilder()->build($crawlerResponses, $sharedHeaders->headers()));
+
+fwrite(STDOUT, 'Done!' . PHP_EOL);
+
+RunSummary::print($store, $crawlerResponses, $requestCounter->requests, $startedAt);
