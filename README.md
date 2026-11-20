@@ -1,6 +1,6 @@
-# Dopple
-
-![](/banner.png)
+<p align="center">
+  <img src="/banner.png" alt="Dopple" width="630">
+</p>
 
 Convert a website to static files without changing any URLs.
 
