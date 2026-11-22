@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd "$(dirname "$0")" && pwd)"
+work_dir="$(mktemp -d)"
+
+trap 'rm -rf "$work_dir"' EXIT
+
+# Copy the project without vendor, so dev dependencies never end up in the phar
+tar -C "$project_dir" \
+    --exclude='./.git' \
+    --exclude='./.idea' \
+    --exclude='./vendor' \
+    --exclude='./tests' \
+    -cf - . | tar -C "$work_dir" -xf -
+
+cd "$work_dir"
+
+cat > box.json <<'JSON'
+{
+    "main": "dopple",
+    "output": "dopple.phar",
+    "directories": ["src"],
+    "finder": [
+        {
+            "in": "vendor",
+            "exclude": ["tests", "Tests", "test", "docs"]
+        }
+    ],
+    "compression": "GZ",
+    "check-requirements": false
+}
+JSON
+
+# Box is downloaded as a standalone phar because it conflicts with Pest's dependencies
+box_version='4.7.1'
+box_sha256='aedabb38bad96a90868603f118956c3faa662b545c06be66df1b145aba703c0a'
+
+curl -fsSL -o box "https://github.com/box-project/box/releases/download/${box_version}/box.phar"
+
+if ! echo "${box_sha256}  box" | sha256sum --check --status; then
+    echo "Checksum mismatch for box ${box_version}" >&2
+    exit 1
+fi
+
+chmod +x box
+
+composer install --no-dev --optimize-autoloader
+
+./box compile
+
+cp dopple.phar "$project_dir/dopple.phar"
+chmod +x "$project_dir/dopple.phar"
+
+echo 'Built dopple.phar'
